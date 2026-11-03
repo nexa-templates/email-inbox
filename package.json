@@ -1,9 +1,11 @@
 {
   "name": "@nexaintel2/email-inbox",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "node scripts/dev.mjs", "build": "node scripts/build.mjs" },
+  "scripts": { "dev": "wrangler dev", "build": "node scripts/build.mjs", "preview": "node scripts/dev.mjs", "test": "bun test tests" },
+  "dependencies": { "postal-mime": "4.2.0" },
+  "devDependencies": { "wrangler": "4.156.1" },
   "engines": { "node": ">=22" },
   "license": "MIT"
 }
