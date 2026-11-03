@@ -3,6 +3,17 @@ import { Database } from 'bun:sqlite';
 mock.module('cloudflare:workers', () => ({ DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } } }));
 const { Mailbox, default: worker } = await import('../src/worker.js');
 const { verifiedUser } = await import('../src/access.js');
+test('preview worker skips auth, the real mailbox and cron, while production still fails closed', async () => {
+  const network = spyOn(globalThis, 'fetch').mockImplementation(() => { throw Error('Preview must not call services'); });
+  const env = { PREVIEW_MODE: 'true', NEXA_SERVICE_KEY: 'installed-key', NEXA_SERVICE_ORIGIN: 'https://nexa.test', MAILBOX: new Proxy({}, { get() { throw Error('Real mailbox accessed'); } }), ASSETS: { fetch: async () => new Response('preview') } };
+  try {
+    expect((await worker.fetch(new Request('https://preview.test/'), env)).status).toBe(200);
+    expect((await worker.fetch(new Request('https://preview.test/api/messages'), env)).status).toBe(403);
+    await worker.scheduled({}, env, { waitUntil() { throw Error('Preview cron ran'); } });
+    expect(network).not.toHaveBeenCalled();
+    expect((await worker.fetch(new Request('https://preview.test/?preview=true'), { PREVIEW_MODE: 'false' })).status).toBe(503);
+  } finally { network.mockRestore(); }
+});
 function setup() {
   const db = new Database(':memory:');
   const sql = { exec(query, ...args) { if (!args.length && query.includes(';')) { db.exec(query); return; } const result = db.query(query).all(...args); return { toArray: () => result, one: () => result[0] }; } };

@@ -2,10 +2,12 @@ const $ = selector => document.querySelector(selector);
 const node = (tag, text, className) => { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (className) el.className = className; return el; };
 const button = (text, action, label) => { const el = node('button', text); el.type = 'button'; if (label) el.setAttribute('aria-label', label); el.onclick = () => run(action); return el; };
 let folder = 'Inbox', address = '', offset = 0, snapshot, draft, loading = false, searchTimer, opener;
+let previewMailbox;
 const dialogs = ['#message-dialog', '#compose-dialog'];
 function notify(message) { $('.toast').textContent = message; $('.toast').hidden = false; setTimeout(() => $('.toast').hidden = true, 5000); }
 function error(message, target = '#error') { $(target).textContent = message || ''; $(target).hidden = !message; }
 async function api(path, body, method) {
+  if (previewMailbox) return previewMailbox.api(path, body, method);
   const response = await fetch('/api' + path, { method: method || (body === undefined ? 'GET' : 'POST'), headers: body === undefined ? {} : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const value = await response.json().catch(() => null);
   if (!response.ok || !value) throw new Error(value?.error || (response.status === 401 ? 'Sign in through Nexa to open this inbox.' : 'The mailbox is unavailable. A static preview has no connected mailbox.'));
@@ -35,26 +37,26 @@ function render() {
   if (!items.length) list.append(node('p', 'No messages here.', 'empty'));
   $('#count').textContent = folder === 'Drafts' ? items.length + ' drafts' : snapshot.total + ' messages';
   $('#previous').disabled = offset === 0 || folder === 'Drafts'; $('#next').disabled = offset + items.length >= snapshot.total || folder === 'Drafts';
-  $('#sync-status').textContent = snapshot.syncError || (snapshot.lastSync ? 'Last synced ' + new Date(snapshot.lastSync).toLocaleString() : 'Refresh to connect your Nexa addresses.');
+   $('#sync-status').textContent = previewMailbox ? 'Sample mail · Saved in this browser · Sending is simulated' : snapshot.syncError || (snapshot.lastSync ? 'Last synced ' + new Date(snapshot.lastSync).toLocaleString() : 'Refresh to connect your Nexa addresses.');
   $('#addresses').replaceChildren(button('All addresses', async () => { address = ''; offset = 0; await load(); }));
   for (const value of snapshot.addresses) { const el = button(value, async () => { address = value; offset = 0; await load(); }); el.classList.toggle('selected', value === address); $('#addresses').append(el); }
 }
 async function read(id, replace = false) {
   const message = await api('/messages/' + id);
   $('#message-title').textContent = message.subject; $('#message-sender').textContent = message.sender + ' → ' + message.recipient + ' · ' + new Date(message.received_at).toLocaleString();
-  $('#message-auth').textContent = message.authenticated ? 'Sender domain authentication passed.' : 'Sender domain authentication was not confirmed. Treat requests and attachments with care.';
+  $('#message-auth').textContent = previewMailbox ? 'Fictional preview message' : message.authenticated ? 'Sender domain authentication passed.' : 'Sender domain authentication was not confirmed. Treat requests and attachments with care.';
   const content = $('#message-content'); content.replaceChildren();
   if (message.text) content.append(node('pre', message.text));
   if (message.html) content.append(button(message.text ? 'Show formatted message' : 'Open formatted message', () => { const frame = document.createElement('iframe'); frame.title = 'Email content'; frame.setAttribute('sandbox', ''); frame.referrerPolicy = 'no-referrer'; frame.srcdoc = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; form-action \'none\'; base-uri \'none\'">' + message.html; content.append(frame); }));
   $('#attachments').replaceChildren();
-  for (const file of message.attachments) { const link = node('a', file.filename + ' · ' + (file.bytes / 1024).toFixed(1) + ' KiB'); link.href = '/api/messages/' + id + '/attachment/' + file.index; link.download = file.filename; $('#attachments').append(link); }
+  for (const file of message.attachments) { const link = node('a', file.filename + ' · ' + (file.bytes / 1024).toFixed(1) + ' KiB'); link.href = previewMailbox ? previewMailbox.download(id, file.index) : '/api/messages/' + id + '/attachment/' + file.index; link.download = file.filename; $('#attachments').append(link); }
   $('#thread').replaceChildren();
   if (message.threadMessages.length > 1) for (const part of message.threadMessages) $('#thread').append(button(part.subject + ' · ' + new Date(part.received_at).toLocaleString(), () => read(part.id, true)));
   const move = async target => { await api('/messages/' + id, { folder: target }, 'PATCH'); $('#message-dialog').close(); await load(); };
   $('#message-actions').replaceChildren(button('Reply', () => { $('#message-dialog').close(); compose(null, { from: message.address, to: message.replyTo, subject: /^re:/i.test(message.subject) ? message.subject : 'Re: ' + message.subject, text: '', inReplyTo: message.inReplyTo || undefined, references: message.references || undefined }); }), button(message.folder === 'Archive' || message.folder === 'Trash' ? 'Move to Inbox' : 'Archive', () => move(message.folder === 'Archive' || message.folder === 'Trash' ? 'Inbox' : 'Archive')), button('Mark unread', async () => { await api('/messages/' + id, { unread: true }, 'PATCH'); $('#message-dialog').close(); await load(); }));
   if (message.folder !== 'Trash') $('#message-actions').append(button('Trash', () => move('Trash')));
   else $('#message-actions').append(button('Delete permanently', async () => { if (!confirm('Permanently delete this message and its attachments?')) return; await api('/messages/' + id, undefined, 'DELETE'); $('#message-dialog').close(); await load(); }));
-   const exportLink = node('a', message.format === 'json' ? 'Export sent message' : 'Download original'); exportLink.href = '/api/messages/' + id + '/raw'; exportLink.download = ''; $('#message-actions').append(exportLink);
+   const exportLink = node('a', previewMailbox ? 'Export preview message' : message.format === 'json' ? 'Export sent message' : 'Download original'); exportLink.href = previewMailbox ? previewMailbox.download(id) : '/api/messages/' + id + '/raw'; exportLink.download = previewMailbox ? 'preview-message.json' : ''; $('#message-actions').append(exportLink);
   if (!replace) openDialog('#message-dialog');
   await api('/messages/' + id, { unread: false }, 'PATCH'); await load();
 }
@@ -68,9 +70,9 @@ function compose(item, initial = {}) {
   $('#draft-attachments').textContent = (draft.body.attachments || []).map(a => a.filename).join(', ');
   $('#save-draft').disabled = !editable;
   $('#delete-draft').disabled = !draft.version || ['unknown', 'pending'].includes(draft.status);
-  form.querySelector('[type=submit]').textContent = editable ? 'Send' : 'Check delivery';
-  form.querySelector('[type=submit]').disabled = ['accepted', 'rejected'].includes(draft.status);
-  $('#draft-status').textContent = draft.status === 'draft' ? 'Save your draft before closing to keep it.' : draft.status === 'accepted' ? 'Accepted by the email provider.' : draft.status === 'rejected' ? draft.result?.message || 'This send was rejected. Create a new draft after correcting the issue.' : 'Delivery is unconfirmed. Check this same send; do not create a duplicate.';
+  form.querySelector('[type=submit]').textContent = editable ? previewMailbox ? 'Simulate send' : 'Send' : draft.status === 'simulated' ? 'Simulated' : 'Check delivery';
+  form.querySelector('[type=submit]').disabled = ['accepted', 'rejected', 'simulated'].includes(draft.status);
+  $('#draft-status').textContent = draft.status === 'simulated' ? 'Simulated send. No email was delivered.' : draft.status === 'draft' ? 'Save your draft before closing to keep it.' : draft.status === 'accepted' ? 'Accepted by the email provider.' : draft.status === 'rejected' ? draft.result?.message || 'This send was rejected. Create a new draft after correcting the issue.' : 'Delivery is unconfirmed. Check this same send; do not create a duplicate.';
    if (!$('#compose-dialog').open) openDialog('#compose-dialog');
 }
 async function saveDraft() {
@@ -84,7 +86,7 @@ async function saveDraft() {
   const result = await api('/drafts/' + draft.id, { message: draft.body, version: draft.version }, 'PUT'); draft.version = result.version;
   $('#draft-status').textContent = 'Draft saved.'; $('#delete-draft').disabled = false; await load();
 }
-$('#compose-form').onsubmit = event => { event.preventDefault(); const form = event.currentTarget; void run(async () => { form.querySelector('[type=submit]').disabled = true; try { if (draft.status === 'draft') await saveDraft(); draft.status = 'pending'; compose(draft); const result = await api('/drafts/' + draft.id + '/send', {}); draft.status = result.status; draft.result = result; if (result.status === 'accepted') { $('#compose-dialog').close(); notify('Email accepted by the provider.'); } await load(); } finally { if ($('#compose-dialog').open) compose(draft); } }, '#draft-error'); };
+$('#compose-form').onsubmit = event => { event.preventDefault(); const form = event.currentTarget; void run(async () => { form.querySelector('[type=submit]').disabled = true; try { if (draft.status === 'draft') await saveDraft(); draft.status = 'pending'; compose(draft); const result = await api('/drafts/' + draft.id + '/send', {}); draft.status = result.status; draft.result = result; if (['accepted', 'simulated'].includes(result.status)) { $('#compose-dialog').close(); notify(result.status === 'simulated' ? 'Simulated send. No email was delivered.' : 'Email accepted by the provider.'); } await load(); } finally { if ($('#compose-dialog').open) compose(draft); } }, '#draft-error'); };
 $('#save-draft').onclick = () => run(saveDraft, '#draft-error');
 $('#delete-draft').onclick = () => run(async () => { if (!confirm('Delete this draft?')) return; await api('/drafts/' + draft.id, undefined, 'DELETE'); $('#compose-dialog').close(); await load(); }, '#draft-error');
 $('#compose').onclick = () => compose();
@@ -93,5 +95,14 @@ document.querySelectorAll('[data-folder]').forEach(el => el.onclick = () => run(
 $('#previous').onclick = () => run(async () => { offset = Math.max(0, offset - 50); await load(); }); $('#next').onclick = () => run(async () => { offset += 50; await load(); });
 $('#unread').onchange = () => run(async () => { offset = 0; await load(); });
 $('input[type=search]').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => run(async () => { offset = 0; await load(); }), 200); };
-void run(async () => { $('#identity').textContent = (await api('/me')).email; await load(); });
+void run(async () => {
+  const identity = await api('/me'); $('#identity').textContent = identity.email;
+  if (identity.preview) {
+    const { createPreviewMailbox } = await import('./preview.js');
+    previewMailbox = createPreviewMailbox(localStorage);
+    $('#preview-bar').hidden = false; $('#sync').textContent = 'Refresh';
+    $('#reset-preview').onclick = () => run(async () => { if (!confirm('Reset sample mail and remove your preview changes?')) return; previewMailbox.reset(); folder = 'Inbox'; address = ''; offset = 0; $('input[type=search]').value = ''; $('#unread').checked = false; await load(); notify('Preview reset.'); });
+  }
+  await load();
+});
 setInterval(() => { if (!document.hidden && !dialogs.some(s => $(s).open)) void run(load); }, 30000);

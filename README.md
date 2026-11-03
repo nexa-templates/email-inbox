@@ -2,16 +2,18 @@
 
 A shared mailbox for your organization's Nexa addresses. Receive external correspondence, read attachments, reply, compose and save drafts, search, star, archive and delete mail. Messages and attachments live in a SQLite Durable Object in **your own Cloudflare account**.
 
-[Interface preview](https://nexa-templates.github.io/email-inbox/preview.html) · [Use with Nexa](https://admin.nexaintel.work)
+[Interactive preview](https://nexa-email-inbox.nexa-templates.workers.dev/) · [Use with Nexa](https://admin.nexaintel.work)
 
 ![Email inbox preview](preview.webp)
 
 ## Set up through Nexa
 
-1. Import this repository as a project in your organization; preserve the upstream history. Configure a unique Worker name in `wrangler.jsonc`.
-2. Keep **Nexa project sign-in enabled** and grant the intended users access to this project. All approved project users share its mailbox. Public deployments fail closed; arbitrary identity headers do not authorize access.
+The Nexa Templates organization maintains and publishes this template. Its deployed website runs with `PREVIEW_MODE: "true"`: anyone can explore fictional mail, search, attachments, drafts, folders and simulated sending without signing in. Preview changes stay in that visitor's browser and can be reset. The server blocks every live mailbox API; preview requests and scheduled jobs never access Nexa Email or the mailbox database. No email is received or delivered by the preview. GitHub Pages is not used.
+
+1. Import this repository as a project in your organization; preserve the upstream history. Configure a unique Worker name and set `vars.PREVIEW_MODE` to `"false"` in `wrangler.jsonc` for a real mailbox.
+2. Keep **Nexa project sign-in enabled** and grant the intended users access to this project. All approved project users share its mailbox. With preview disabled, missing sign-in configuration fails closed; arbitrary identity headers do not authorize access. Preview never opens the real mailbox, even when service credentials are installed.
 3. In **Project → Services**, enable Email and choose **Set up project access**. This installs runtime-only `NEXA_SERVICE_KEY` and `NEXA_SERVICE_ORIGIN` with Send and Receive email permissions. Existing installations need setup again to add Receive email, then redeployment. Never commit or expose the key in browser code.
-4. In Nexa **Build & deploy**, select the connected Worker and production branch, use `/` as the root, `bun install --frozen-lockfile` to install, `bun test && bun run build` to build, and `npx --no-install wrangler deploy --name "$NEXA_WORKER_NAME"` to deploy. Enable automatic deployments, run the initial build, and follow its exact commit to success with a saved deployment and Visit URL. Later production-branch pushes use the same pipeline. Authentication is built into the source: the installed receive credential registers sign-in only after Nexa verifies the Worker hostname through Cloudflare. Each request checks current project membership and session validity. There is no separate login secret to copy or public mailbox mode.
+4. In Nexa **Build & deploy**, select the connected Worker and production branch, use `/` as the root, `bun install --frozen-lockfile` to install, `bun test && bun run build` to build, and `npx --no-install wrangler deploy --name "$NEXA_WORKER_NAME"` to deploy. Enable automatic deployments, run the initial build, and follow its exact commit to success with a saved deployment and Visit URL. Later production-branch pushes use the same pipeline. Authentication is built into the source: the installed receive credential registers sign-in only after Nexa verifies the Worker hostname through Cloudflare. Each real mailbox request checks current project membership and session validity. There is no separate login secret to copy.
 5. In **Settings → General → Organization email**, add an alias such as `company+accounting@nexaintel.work` and select this project. Click **Refresh & sync** in the inbox. A scheduled job also syncs every minute.
 
 Nexa supplies email sending and reception. No customer Workers Paid subscription or separate mailbox-provider account is required for setup. Customer Workers CPU/request and SQLite storage limits still apply; large MIME messages or heavy traffic may require additional capacity. Do not use another customer's database or the public preview's data.
@@ -24,10 +26,10 @@ Node.js 22+ and Bun for tests:
 bun install --frozen-lockfile
 bun run build        # static assets in dist/
 bun test             # mailbox persistence/retry/access tests
-bun run dev          # local Worker; authentication must use a local test provider
+bun run dev          # public preview; real mode needs a test auth provider
 ```
 
-The Worker entry is `src/worker.js`, with the `MAILBOX` SQLite Durable Object and an initial migration. `index.html`, `mail.css`, `styles.css` and `app.js` contain the interface. GitHub Pages serves an interface preview only; it cannot run this backend. `npm run preview` serves static assets for layout work, without a connected mailbox.
+The Worker entry is `src/worker.js`, with the `MAILBOX` SQLite Durable Object and an initial migration. `index.html`, `mail.css`, `styles.css` and `app.js` contain the interface. `preview.js` supplies the separate browser-only sample mailbox; `src/preview.js` rejects access to real mail while preview is enabled. Use `bun run dev` to test the preview through the Worker.
 
 ## Mail handling
 

@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import PostalMime from 'postal-mime';
 import { verifiedUser } from './access.js';
 import { createSiteAuth } from './site-auth.js';
+import { isPreview, previewResponse } from './preview.js';
 
 const MAX_MAIL = 5 * 1024 * 1024, MAX_STORE = 512 * 1024 * 1024, CHUNK = 128 * 1024;
 const json = (value, status = 200) => Response.json(value, { status, headers: { 'cache-control': 'no-store' } });
@@ -15,6 +16,7 @@ async function bytes(request, limit) {
   const value = new Uint8Array(length); let offset = 0; for (const chunk of chunks) { value.set(chunk, offset); offset += chunk.length; } return value;
 }
 async function nexa(env, path, init = {}) {
+  if (isPreview(env)) throw fail('Nexa services are disabled in preview.', 403);
   if (!env.NEXA_SERVICE_KEY || !env.NEXA_SERVICE_ORIGIN) throw fail('Set up Email in the project’s Nexa Services and deploy its runtime secrets.', 503);
   const origin = new URL(env.NEXA_SERVICE_ORIGIN);
   if (origin.protocol !== 'https:' && origin.hostname !== 'localhost' && origin.hostname !== '127.0.0.1') throw fail('Use a secure Nexa service origin.', 503);
@@ -155,7 +157,7 @@ export class Mailbox extends DurableObject {
 }
 
 const application = {
-  async scheduled(_event, env, ctx) { ctx.waitUntil(env.MAILBOX.get(env.MAILBOX.idFromName('inbox')).sync().catch(() => {})); },
+  async scheduled(_event, env, ctx) { if (!isPreview(env)) ctx.waitUntil(env.MAILBOX.get(env.MAILBOX.idFromName('inbox')).sync().catch(() => {})); },
   async fetch(request, env) {
     const url = new URL(request.url);
     const user = await verifiedUser(request, env.NEXA_SERVICE_KEY);
@@ -173,6 +175,7 @@ let authentication;
 export default {
   scheduled: application.scheduled,
   async fetch(request, env, ctx) {
+    if (isPreview(env)) return previewResponse(request, env);
     try {
       const origin = new URL(request.url).origin;
       if (!authentication || authentication.origin !== origin || authentication.key !== env.NEXA_SERVICE_KEY || authentication.expires < Date.now()) {

@@ -2,6 +2,7 @@
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="Your shared organization inbox, powered by Nexa."><title>Inbox · Nexa Mail</title><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="mail.css"><script src="app.js" defer></script></head>
 <body>
+  <aside id="preview-bar" class="preview-bar" hidden><strong>Preview</strong><span>Sample mail · No email delivery</span><button id="reset-preview" type="button">Reset preview</button></aside>
   <header class="topbar"><a class="brand" href="./"><span class="brand-icon">n</span>nexa <span>mail</span></a><label class="search"><input type="search" placeholder="Search mail" aria-label="Search mail"></label><span id="identity" class="muted"></span></header>
   <div class="layout">
     <aside class="sidebar"><button class="compose" id="compose"><span aria-hidden="true">+</span>Compose</button><nav aria-label="Mail folders"><button class="selected" data-folder="Inbox">Inbox</button><button data-folder="Starred">Starred</button><button data-folder="Sent">Sent</button><button data-folder="Drafts">Drafts</button><button data-folder="Archive">Archive</button><button data-folder="Trash">Trash</button></nav><div class="section-label">RECEIVING ADDRESSES</div><nav id="addresses" aria-label="Receiving addresses"></nav></aside>
